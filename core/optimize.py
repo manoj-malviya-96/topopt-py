@@ -10,13 +10,10 @@ from core.filters import create_filter_kernel, apply_density_filter
 from core.mesh import RectangularMesh, setup_problem
 from core.solver import solve_displacements, SolverMethod
 from core.stiffness import build_element_stiffness, assemble_stiffness_matrix
-from core.utils import time_benchmark, memory_benchmark
 
 logger = logging.getLogger(__name__)
 
 
-@time_benchmark
-@memory_benchmark
 def run_optimization(
         nelx: int,
         nely: int,

@@ -7,6 +7,7 @@ import sys
 from core.mesh import plot_density
 from core.optimize import run_optimization
 from core.solver import SolverMethod
+from core.utils import memory_benchmark, time_benchmark
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -56,13 +57,19 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+@time_benchmark
+@memory_benchmark
+def _run_optimization(*args):
+    return run_optimization(*args)
+
+
 def main() -> int:
     args = parse_args()
     setup_logging(args.verbose)
     solver_method = SolverMethod.DIRECT if args.solver == 'direct' else SolverMethod.ITERATIVE
 
     try:
-        result = run_optimization(
+        result = _run_optimization(
             nelx=args.nelx,
             nely=args.nely,
             problem_type=args.problem,
