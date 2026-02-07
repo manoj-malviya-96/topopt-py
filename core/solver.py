@@ -1,8 +1,11 @@
-import numpy as np
 from enum import Enum, auto
+
+import numpy as np
+from numpy.typing import NDArray
 from scipy.sparse import csr_matrix as SparseMatrix
 from scipy.sparse.linalg import spsolve, cg
-from numpy.typing import NDArray
+
+from core.utils import time_benchmark
 
 
 class SolverMethod(Enum):
@@ -10,6 +13,7 @@ class SolverMethod(Enum):
     ITERATIVE = auto()
 
 
+@time_benchmark
 def _modify_system_for_bcs(
         stiffness_matrix: SparseMatrix,
         force_vector: NDArray[np.float64],
