@@ -1,106 +1,152 @@
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from venv import logger
+from typing import Callable
 
 import numpy as np
 from numpy.typing import NDArray
+from tqdm import tqdm
+
+from core.filters import create_filter_kernel, apply_density_filter
+from core.mesh import RectangularMesh
+from core.solver import solve_displacements, SolverMethod
+from core.stiffness import build_element_stiffness, assemble_stiffness_matrix
 
 
-def std_optimize_update(
+@dataclass
+class TopOptConfig:
+    target_vol_frac: float = 0.5
+    penalization: float = 3.0
+    r_min: float = 1.5
+    young_modulus: float = 1.0
+    young_modulus_min: float = 1e-9
+    move: float = 0.2
+    max_iter: int = 100
+    tol: float = 0.01
+    solver_method: SolverMethod = SolverMethod.DIRECT
+    use_filter: bool = True
+
+
+IterationCallback = Callable[[int, NDArray[np.float64], float, float, float], bool]
+
+
+def _oc_update(
         x: NDArray[np.float64],
-        x_target: float,
-        derivative_objective: NDArray[np.float64],
-        derivative_constraint: NDArray[np.float64],
-        move: float,
-        max_iter: int = 50,
-        tol: float = 1e-4
-) -> NDArray[np.float64]:
+        dc: NDArray[np.float64],
+        dv: NDArray[np.float64],
+        volfrac: float,
+        move: float
+) -> None:
     """
-    Optimality Criteria update with improved robustness, clarity, and efficiency.
+    Optimality Criteria update. Modifies x in-place.
     """
-    # 1. Pre-calculate combined bounds once, outside the loop.
     lower_bound = np.maximum(x - move, 1e-3)
     upper_bound = np.minimum(x + move, 1.0)
     lambda_min, lambda_max = 0.0, 1e9
-    x_new = x.copy()
 
-    for _ in range(max_iter):
+    for _ in range(50):
         lambda_mid = 0.5 * (lambda_min + lambda_max)
 
-        # 2. Safely calculate the update factor 'B' to avoid sqrt of negative numbers.
-        # We only update elements where the sensitivity condition (-dc/dv) is positive.
-        ratio = -derivative_objective / (derivative_constraint * lambda_mid)
+        # B_e = sqrt(-dc / (dv * lambda))
+        ratio = -dc / (dv * lambda_mid)
+        be = np.where(ratio > 0, np.sqrt(ratio), 1.0)
 
-        # Default to B=1 (no change), then update only the valid elements.
-        be = np.ones_like(x)
-        update_mask = ratio > 0
-        be[update_mask] = np.sqrt(ratio[update_mask])
+        # Update and clip
+        np.multiply(x, be, out=x)
+        np.clip(x, lower_bound, upper_bound, out=x)
 
-        # 3. Apply the update and a single, combined clip.
-        x_new = np.clip(x * be, lower_bound, upper_bound)
-
-        # 4. Use standard bisection logic.
-        x_mean = x_new.mean()
-        if x_mean - x_target > 0:
+        # Bisection
+        if x.mean() > volfrac:
             lambda_min = lambda_mid
         else:
             lambda_max = lambda_mid
 
-        # Check for convergence
-        if abs(x_mean - x_target) < tol:
+        if abs(x.mean() - volfrac) < 1e-4:
             break
 
-    return x_new
 
-
-class OptimizerProblem(ABC):
-
-    @abstractmethod
-    def objective(self, x: NDArray[np.float64]) -> float:
-        pass
-
-    @abstractmethod
-    def constraint(self, x: NDArray[np.float64]) -> float:
-        pass
-
-    @abstractmethod
-    def derivative_objective(self, x: NDArray[np.float64]) -> NDArray[np.float64]:
-        pass
-
-    @abstractmethod
-    def derivative_constraint(self, x: NDArray[np.float64]) -> NDArray[np.float64]:
-        pass
-
-
-@dataclass(frozen=True)
-class OptimizerParams:
-    x_target: float
-    move: float = 0.2
-    max_iteration: int = 50
-    tol: float = 1e-4
-
-
-def optimize(problem: OptimizerProblem, x_guess: NDArray[np.float64], params: OptimizerParams) -> NDArray[np.float64]:
+def optimize_compliance(
+        mesh: RectangularMesh,
+        fixed_dofs: NDArray[np.int64],
+        force_vector: NDArray[np.float64],
+        config: TopOptConfig,
+        callback: IterationCallback | None = None,
+        show_progress: bool = True
+) -> tuple[NDArray[np.float64], float]:
     """
-    Optimize the design variable x using the provided problem and parameters.
+    Run SIMP topology optimization for compliance minimization.
     """
-    x = x_guess
+    stiffness_mat = build_element_stiffness(nu=0.3)
+    filter_kernel = create_filter_kernel(config.r_min) if config.use_filter else None
 
-    for i in range(params.max_iteration):
-        # Calculate derivatives
-        d_obj = problem.derivative_objective(x)
-        d_con = problem.derivative_constraint(x)
+    def apply_filter(x: NDArray[np.float64]) -> NDArray[np.float64]:
+        if filter_kernel is None:
+            return x
+        x_2d = x.reshape((mesh.nelx, mesh.nely))
+        return apply_density_filter(x_2d, filter_kernel, mode='constant').flatten()
 
-        # Perform the update
-        x_new = std_optimize_update(
-            x, params.x_target, d_obj, d_con, params.move, params.max_iteration, params.tol
+    # Initialize design variables
+    x = np.full(mesh.n_elem, config.target_vol_frac, dtype=np.float64)
+    x_old = np.empty_like(x)
+
+    # Progress bar
+    pbar = tqdm(
+        range(1, config.max_iter + 1),
+        desc="Optimizing",
+        disable=not show_progress,
+        ncols=80
+    )
+
+    compliance = 0.0
+    for iteration in pbar:
+        # Apply density filter
+        x_phys = apply_filter(x)
+
+        # Assemble stiffness and solve
+        global_stiffness_matrix = assemble_stiffness_matrix(
+            mesh.elem_conn, stiffness_mat, x_phys,
+            config.penalization, config.young_modulus, config.young_modulus_min
         )
+        u = solve_displacements(global_stiffness_matrix, force_vector, fixed_dofs, config.solver_method)
+        compliance = float(force_vector @ u)
 
-        # Check for convergence
-        if np.linalg.norm(x_new - x) < params.tol:
+        # Compute sensitivities
+        elem_u = u[mesh.elem_conn]
+        strain_energy = np.einsum('ij,jk,ik->i', elem_u, stiffness_mat, elem_u)
+        dc = -config.penalization * (config.young_modulus - config.young_modulus_min) * \
+             (x_phys ** (config.penalization - 1)) * strain_energy
+
+        # Filter sensitivities
+        if filter_kernel is not None:
+            dc_2d = dc.reshape((mesh.nelx, mesh.nely))
+            dc = apply_density_filter(dc_2d, filter_kernel, mode='constant').flatten()
+
+        dv = np.ones(mesh.n_elem) / mesh.n_elem
+
+        # Store old design
+        np.copyto(x_old, x)
+
+        # OC update (in-place)
+        _oc_update(x, dc, dv, config.target_vol_frac, config.move)
+
+        # Compute change
+        change = np.max(np.abs(x - x_old))
+        volume = x.mean()
+
+        # Update progress
+        pbar.set_postfix({'C': f'{compliance:.2f}', 'V': f'{volume:.3f}', 'Δ': f'{change:.4f}'})
+
+        # Callback
+        if callback is not None and callback(iteration, x, compliance, volume, change):
+            pbar.set_description("Stopped")
             break
-        x = x_new
-        logger.info(f"Iteration: {i}, Objective: {problem.objective(x_new)}, "
-                    f"Constraint: {problem.constraint(x_new)}")
 
-    return x
+        # Check convergence
+        if change < config.tol:
+            pbar.set_description("Converged")
+            break
+    else:
+        pbar.set_description("Max iter")
+
+    pbar.close()
+
+    # Return filtered density
+    return apply_filter(x), compliance
