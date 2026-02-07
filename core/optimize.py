@@ -1,14 +1,65 @@
+import logging
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 from numpy.typing import NDArray
 from tqdm import tqdm
 
 from core.filters import create_filter_kernel, apply_density_filter
-from core.mesh import RectangularMesh
+from core.mesh import RectangularMesh, setup_problem
 from core.solver import solve_displacements, SolverMethod
 from core.stiffness import build_element_stiffness, assemble_stiffness_matrix
+from core.utils import time_benchmark, memory_benchmark
+
+logger = logging.getLogger(__name__)
+
+
+@time_benchmark
+@memory_benchmark
+def run_optimization(
+        nelx: int,
+        nely: int,
+        problem_type: Literal["mbb", "cantilever"],
+        volfrac: float,
+        penalization: float,
+        r_min: float,
+        max_iter: int,
+        tol: float,
+        solver_method: SolverMethod,
+        use_filter: bool,
+) -> np.ndarray:
+    """
+    Run the topology optimization.
+    """
+    logger.info(f"Setting up {problem_type.upper()} problem: {nelx} x {nely} elements")
+
+    mesh, fixed_dofs, force_vector = setup_problem(nelx, nely, problem_type)
+    logger.info(f"Mesh: {mesh.n_elem} elements, {mesh.n_node} nodes, {mesh.n_dof} DOFs")
+
+    config = TopOptConfig(
+        target_vol_frac=volfrac,
+        penalization=penalization,
+        r_min=r_min,
+        move=0.2,
+        max_iter=max_iter,
+        tol=tol,
+        solver_method=solver_method,
+        use_filter=use_filter
+    )
+
+    # Run optimization
+    logger.info("Starting optimization...")
+    x_final, compliance = optimize_compliance(
+        mesh=mesh,
+        fixed_dofs=fixed_dofs,
+        force_vector=force_vector,
+        config=config,
+        show_progress=True
+    )
+    logger.info(f"Final compliance: {compliance:.4f}")
+    logger.info(f"Final volume fraction: {x_final.mean():.4f}")
+    return x_final
 
 
 @dataclass
