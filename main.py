@@ -27,9 +27,9 @@ def parse_args() -> argparse.Namespace:
         description='Topology Optimization using SIMP method',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument('--nelx', type=int, default=30,
+    parser.add_argument('--nelx', type=int, default=60,
                         help='Number of elements in x direction')
-    parser.add_argument('--nely', type=int, default=10,
+    parser.add_argument('--nely', type=int, default=30,
                         help='Number of elements in y direction')
     parser.add_argument('--problem', type=str, default='mbb',
                         choices=['mbb', 'cantilever'],
