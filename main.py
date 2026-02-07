@@ -7,9 +7,10 @@ from typing import Literal
 
 import numpy as np
 
-from core.mesh import setup_problem, plot_density
+from core.mesh import setup_problem
 from core.optimize import optimize_compliance, TopOptConfig
 from core.solver import SolverMethod
+from core.utils import time_benchmark, memory_benchmark
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -48,8 +49,6 @@ def parse_args() -> argparse.Namespace:
                         help='Linear solver method')
     parser.add_argument('--no-filter', action='store_true',
                         help='Disable density filtering')
-    parser.add_argument('--plot-every', type=int, default=0,
-                        help='Plot intermediate results every N iterations (0 to disable)')
     parser.add_argument('--save', type=str, default=None,
                         help='Save final result to file (e.g., result.png)')
     parser.add_argument('--verbose', '-v', action='store_true',
@@ -61,6 +60,8 @@ def parse_args() -> argparse.Namespace:
 logger = logging.getLogger(__name__)
 
 
+@time_benchmark
+@memory_benchmark
 def run_optimization(
         nelx: int,
         nely: int,
@@ -72,7 +73,6 @@ def run_optimization(
         tol: float,
         solver_method: SolverMethod,
         use_filter: bool,
-        plot_every: int,
         save_path: str | None
 ) -> np.ndarray:
     """
@@ -94,12 +94,6 @@ def run_optimization(
         use_filter=use_filter
     )
 
-    def plot_callback(iteration: int, x: np.ndarray, compliance: float,
-                      volume: float, change: float) -> bool:
-        if plot_every > 0 and iteration % plot_every == 0:
-            plot_density(x, nelx, nely, iteration=iteration, show=True)
-        return False
-
     # Run optimization
     logger.info("Starting optimization...")
     x_final, compliance = optimize_compliance(
@@ -107,16 +101,13 @@ def run_optimization(
         fixed_dofs=fixed_dofs,
         force_vector=force_vector,
         config=config,
-        callback=plot_callback if plot_every > 0 else None,
         show_progress=True
     )
-
-    logger.info("=" * 60)
     logger.info(f"Final compliance: {compliance:.4f}")
     logger.info(f"Final volume fraction: {x_final.mean():.4f}")
 
     # Plot final result
-    plot_density(x_final, nelx, nely, show=True, save_path=save_path)
+    # plot_density(x_final, nelx, nely, show=True, save_path=save_path)
 
     if save_path:
         logger.info(f"Result saved to: {save_path}")
@@ -141,7 +132,6 @@ def main() -> int:
             tol=args.tol,
             solver_method=solver_method,
             use_filter=not args.no_filter,
-            plot_every=args.plot_every,
             save_path=args.save
         )
         return 0

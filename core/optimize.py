@@ -42,10 +42,9 @@ def _oc_update(
     upper_bound = np.minimum(x + move, 1.0)
     lambda_min, lambda_max = 0.0, 1e9
 
-    for _ in range(50):
+    # Run binary search
+    for i in range(100):
         lambda_mid = 0.5 * (lambda_min + lambda_max)
-
-        # B_e = sqrt(-dc / (dv * lambda))
         ratio = -dc / (dv * lambda_mid)
         be = np.where(ratio > 0, np.sqrt(ratio), 1.0)
 
@@ -68,7 +67,6 @@ def optimize_compliance(
         fixed_dofs: NDArray[np.int64],
         force_vector: NDArray[np.float64],
         config: TopOptConfig,
-        callback: IterationCallback | None = None,
         show_progress: bool = True
 ) -> tuple[NDArray[np.float64], float]:
     """
@@ -77,17 +75,15 @@ def optimize_compliance(
     stiffness_mat = build_element_stiffness(nu=0.3)
     filter_kernel = create_filter_kernel(config.r_min) if config.use_filter else None
 
-    def apply_filter(x: NDArray[np.float64]) -> NDArray[np.float64]:
+    def apply_filter(input_array: NDArray[np.float64]) -> NDArray[np.float64]:
         if filter_kernel is None:
-            return x
-        x_2d = x.reshape((mesh.nelx, mesh.nely))
+            return input_array
+        x_2d = input_array.reshape((mesh.nelx, mesh.nely))
         return apply_density_filter(x_2d, filter_kernel, mode='constant').flatten()
 
-    # Initialize design variables
     x = np.full(mesh.n_elem, config.target_vol_frac, dtype=np.float64)
     x_old = np.empty_like(x)
 
-    # Progress bar
     pbar = tqdm(
         range(1, config.max_iter + 1),
         desc="Optimizing",
@@ -108,7 +104,6 @@ def optimize_compliance(
         u = solve_displacements(global_stiffness_matrix, force_vector, fixed_dofs, config.solver_method)
         compliance = float(force_vector @ u)
 
-        # Compute sensitivities
         elem_u = u[mesh.elem_conn]
         strain_energy = np.einsum('ij,jk,ik->i', elem_u, stiffness_mat, elem_u)
         dc = -config.penalization * (config.young_modulus - config.young_modulus_min) * \
@@ -133,12 +128,6 @@ def optimize_compliance(
 
         # Update progress
         pbar.set_postfix({'C': f'{compliance:.2f}', 'V': f'{volume:.3f}', 'Δ': f'{change:.4f}'})
-
-        # Callback
-        if callback is not None and callback(iteration, x, compliance, volume, change):
-            pbar.set_description("Stopped")
-            break
-
         # Check convergence
         if change < config.tol:
             pbar.set_description("Converged")
