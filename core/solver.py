@@ -16,7 +16,6 @@ class SolverMethod(Enum):
 @time_benchmark
 def _modify_system_for_bcs(
         stiffness_matrix: SparseMatrix,
-        force_vector: NDArray[np.float64],
         fixed_dof_indices: NDArray[np.int64]
 ) -> tuple[SparseMatrix, NDArray[np.float64]]:
     """
@@ -24,16 +23,12 @@ def _modify_system_for_bcs(
     Returns modified stiffness matrix and force vector.
     """
     stiffness_modified = stiffness_matrix.copy().tolil()  # LIL for efficient row/col assignment
-    force_modified = force_vector.copy()
 
-    # Enforce u[fixed_dof_indices] = 0 by zeroing corresponding rows/cols and setting diagonal to 1
     for fixed_dof in fixed_dof_indices:
         stiffness_modified[fixed_dof, :] = 0.0
         stiffness_modified[:, fixed_dof] = 0.0
         stiffness_modified[fixed_dof, fixed_dof] = 1.0
-    force_modified[fixed_dof_indices] = 0.0
-
-    return stiffness_modified.tocsc(), force_modified
+    return stiffness_modified.tocsc()
 
 
 def _solve_direct(
@@ -44,10 +39,10 @@ def _solve_direct(
     """
     Solve the modified full linear system with a direct solver.
     """
-    stiffness_modified, force_modified = _modify_system_for_bcs(
-        stiffness_matrix, force_vector, fixed_dof_indices
+    stiffness_modified = _modify_system_for_bcs(
+        stiffness_matrix, fixed_dof_indices
     )
-    return spsolve(stiffness_modified, force_modified, use_umfpack=True)
+    return spsolve(stiffness_modified, force_vector, use_umfpack=True)
 
 
 def _solve_using_cg(
@@ -59,10 +54,10 @@ def _solve_using_cg(
     Solve the modified full linear system with Conjugate Gradient.
     Raises RuntimeError if CG does not converge.
     """
-    stiffness_modified, force_modified = _modify_system_for_bcs(
-        stiffness_matrix, force_vector, fixed_dof_indices
+    stiffness_modified = _modify_system_for_bcs(
+        stiffness_matrix, fixed_dof_indices
     )
-    solution_vector, exit_code = cg(stiffness_modified, force_modified)
+    solution_vector, exit_code = cg(stiffness_modified, force_vector)
     if exit_code != 0:
         raise RuntimeError(f"Conjugate Gradient solver did not converge (exit code: {exit_code}).")
     return solution_vector
