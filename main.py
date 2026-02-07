@@ -5,7 +5,7 @@ import logging
 import sys
 
 from core.mesh import plot_density
-from core.optimize import run_optimization
+from core.optimize import run_optimization, TopOptConfig
 from core.solver import SolverMethod
 from core.utils import memory_benchmark, time_benchmark
 
@@ -69,11 +69,11 @@ def main() -> int:
     solver_method = SolverMethod.DIRECT if args.solver == 'direct' else SolverMethod.ITERATIVE
 
     try:
-        result = _run_optimization(
+        config = TopOptConfig(
             nelx=args.nelx,
             nely=args.nely,
             problem_type=args.problem,
-            volfrac=args.volfrac,
+            target_vol_frac=args.volfrac,
             penalization=args.penal,
             r_min=args.rmin,
             max_iter=args.maxiter,
@@ -81,6 +81,7 @@ def main() -> int:
             solver_method=solver_method,
             use_filter=not args.no_filter,
         )
+        result = _run_optimization(config)
         plot_density(result, args.nelx, args.nely, show=True, save_path=args.save)
         if args.save:
             logger.info(f"Result saved to: {args.save}")
