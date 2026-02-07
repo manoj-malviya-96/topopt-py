@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""
-Topology Optimization using SIMP (Solid Isotropic Material with Penalization)
 
-Usage:
-    python main.py --nelx 60 --nely 20 --volfrac 0.5 --penal 3.0 --rmin 1.5
-
-Example problems:
-    MBB beam (default): python main.py --problem mbb
-    Cantilever beam:    python main.py --problem cantilever
-"""
 import argparse
 import logging
 import sys
@@ -31,13 +22,10 @@ def setup_logging(verbose: bool = False) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description='Topology Optimization using SIMP method',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-
-    # Problem geometry
     parser.add_argument('--nelx', type=int, default=60,
                         help='Number of elements in x direction')
     parser.add_argument('--nely', type=int, default=20,
@@ -45,8 +33,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('--problem', type=str, default='mbb',
                         choices=['mbb', 'cantilever'],
                         help='Problem type')
-
-    # Optimization parameters
     parser.add_argument('--volfrac', type=float, default=0.5,
                         help='Volume fraction constraint')
     parser.add_argument('--penal', type=float, default=3.0,
@@ -57,15 +43,11 @@ def parse_args() -> argparse.Namespace:
                         help='Maximum number of iterations')
     parser.add_argument('--tol', type=float, default=0.01,
                         help='Convergence tolerance for design change')
-
-    # Solver options
     parser.add_argument('--solver', type=str, default='direct',
                         choices=['direct', 'iterative'],
                         help='Linear solver method')
     parser.add_argument('--no-filter', action='store_true',
                         help='Disable density filtering')
-
-    # Output options
     parser.add_argument('--plot-every', type=int, default=0,
                         help='Plot intermediate results every N iterations (0 to disable)')
     parser.add_argument('--save', type=str, default=None,
@@ -74,6 +56,9 @@ def parse_args() -> argparse.Namespace:
                         help='Enable verbose output')
 
     return parser.parse_args()
+
+
+logger = logging.getLogger(__name__)
 
 
 def run_optimization(
@@ -92,18 +77,12 @@ def run_optimization(
 ) -> np.ndarray:
     """
     Run the topology optimization.
-
-    Returns:
-        Final optimized density field
     """
-    logger = logging.getLogger(__name__)
-
-    # Setup mesh and boundary conditions
     logger.info(f"Setting up {problem_type.upper()} problem: {nelx} x {nely} elements")
+
     mesh, fixed_dofs, force_vector = setup_problem(nelx, nely, problem_type)
     logger.info(f"Mesh: {mesh.n_elem} elements, {mesh.n_node} nodes, {mesh.n_dof} DOFs")
 
-    # Configuration
     config = TopOptConfig(
         target_vol_frac=volfrac,
         penalization=penalization,
@@ -115,7 +94,6 @@ def run_optimization(
         use_filter=use_filter
     )
 
-    # Callback for intermediate plotting
     def plot_callback(iteration: int, x: np.ndarray, compliance: float,
                       volume: float, change: float) -> bool:
         if plot_every > 0 and iteration % plot_every == 0:
@@ -147,10 +125,8 @@ def run_optimization(
 
 
 def main() -> int:
-    """Main entry point."""
     args = parse_args()
     setup_logging(args.verbose)
-
     solver_method = SolverMethod.DIRECT if args.solver == 'direct' else SolverMethod.ITERATIVE
 
     try:
