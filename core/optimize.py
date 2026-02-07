@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -14,36 +14,33 @@ from core.stiffness import build_element_stiffness, assemble_stiffness_matrix
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class TopOptConfig:
+    nelx: int = 30
+    nely: int = 10
+    problem_type: Literal["mbb", "cantilever"] = "cantilever"
+    target_vol_frac: float = 0.5
+    penalization: float = 3.0
+    r_min: float = 1.5
+    young_modulus: float = 1.0
+    young_modulus_min: float = 1e-9
+    move: float = 0.2
+    max_iter: int = 100
+    tol: float = 0.01
+    solver_method: SolverMethod = SolverMethod.DIRECT
+    use_filter: bool = True
+
+
 def run_optimization(
-        nelx: int,
-        nely: int,
-        problem_type: Literal["mbb", "cantilever"],
-        volfrac: float,
-        penalization: float,
-        r_min: float,
-        max_iter: int,
-        tol: float,
-        solver_method: SolverMethod,
-        use_filter: bool,
+        config: TopOptConfig,
 ) -> np.ndarray:
     """
     Run the topology optimization.
     """
-    logger.info(f"Setting up {problem_type.upper()} problem: {nelx} x {nely} elements")
+    logger.info(f"Setting up {config.problem_type.upper()} problem: {config.nelx} x {config.nely} elements")
 
-    mesh, fixed_dofs, force_vector = setup_problem(nelx, nely, problem_type)
+    mesh, fixed_dofs, force_vector = setup_problem(config.nelx, config.nely, config.problem_type)
     logger.info(f"Mesh: {mesh.n_elem} elements, {mesh.n_node} nodes, {mesh.n_dof} DOFs")
-
-    config = TopOptConfig(
-        target_vol_frac=volfrac,
-        penalization=penalization,
-        r_min=r_min,
-        move=0.2,
-        max_iter=max_iter,
-        tol=tol,
-        solver_method=solver_method,
-        use_filter=use_filter
-    )
 
     # Run optimization
     logger.info("Starting optimization...")
@@ -57,23 +54,6 @@ def run_optimization(
     logger.info(f"Final compliance: {compliance:.4f}")
     logger.info(f"Final volume fraction: {x_final.mean():.4f}")
     return x_final
-
-
-@dataclass
-class TopOptConfig:
-    target_vol_frac: float = 0.5
-    penalization: float = 3.0
-    r_min: float = 1.5
-    young_modulus: float = 1.0
-    young_modulus_min: float = 1e-9
-    move: float = 0.2
-    max_iter: int = 100
-    tol: float = 0.01
-    solver_method: SolverMethod = SolverMethod.DIRECT
-    use_filter: bool = True
-
-
-IterationCallback = Callable[[int, NDArray[np.float64], float, float, float], bool]
 
 
 def _oc_update(
