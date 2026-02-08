@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from core.filters import create_filter_kernel, apply_density_filter
 from core.mesh import RectangularMesh, setup_problem
-from core.solver import solve_displacements, SolverMethod
+from core.solver import solve_displacements, SolverMethod, compute_free_dofs
 from core.stiffness import build_element_stiffness, assemble_stiffness_matrix
 
 logger = logging.getLogger(__name__)
@@ -103,6 +103,9 @@ def optimize_compliance(
     stiffness_mat = build_element_stiffness(nu=0.3)
     filter_kernel = create_filter_kernel(config.r_min) if config.use_filter else None
 
+    # Cache free DOFs once (fixed DOFs don't change during optimization)
+    free_dofs = compute_free_dofs(mesh.n_dof, fixed_dofs)
+
     def apply_filter(input_array: NDArray[np.float64]) -> NDArray[np.float64]:
         if filter_kernel is None:
             return input_array
@@ -129,7 +132,7 @@ def optimize_compliance(
             mesh.elem_conn, stiffness_mat, x_phys,
             config.penalization, config.young_modulus, config.young_modulus_min
         )
-        u = solve_displacements(global_stiffness_matrix, force_vector, fixed_dofs, config.solver_method)
+        u = solve_displacements(global_stiffness_matrix, force_vector, free_dofs, config.solver_method)
         compliance = float(force_vector @ u)
 
         elem_u = u[mesh.elem_conn]
