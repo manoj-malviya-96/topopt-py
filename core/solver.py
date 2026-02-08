@@ -5,80 +5,63 @@ from numpy.typing import NDArray
 from scipy.sparse import csr_matrix as SparseMatrix
 from scipy.sparse.linalg import spsolve, cg
 
-from core.utils import time_benchmark
-
 
 class SolverMethod(Enum):
     DIRECT = auto()
     ITERATIVE = auto()
 
 
-@time_benchmark
-def _modify_system_for_bcs(
-        stiffness_matrix: SparseMatrix,
-        fixed_dof_indices: NDArray[np.int64]
-) -> tuple[SparseMatrix, NDArray[np.float64]]:
+def compute_free_dofs(n_dof: int, fixed_dof_indices: NDArray[np.int64]) -> NDArray[np.int64]:
     """
-    Apply Dirichlet BCs by modifying the full system in-place (via a copy).
-    Returns modified stiffness matrix and force vector.
+    Compute free DOF indices (complement of fixed DOFs).
+    Cache this result and reuse across iterations.
     """
-    stiffness_modified = stiffness_matrix.copy().tolil()  # LIL for efficient row/col assignment
-
-    for fixed_dof in fixed_dof_indices:
-        stiffness_modified[fixed_dof, :] = 0.0
-        stiffness_modified[:, fixed_dof] = 0.0
-        stiffness_modified[fixed_dof, fixed_dof] = 1.0
-    return stiffness_modified.tocsc()
+    all_dofs = np.arange(n_dof, dtype=np.int64)
+    return np.setdiff1d(all_dofs, fixed_dof_indices)
 
 
-def _solve_direct(
+def _solve_reduced_system(
         stiffness_matrix: SparseMatrix,
         force_vector: NDArray[np.float64],
-        fixed_dof_indices: NDArray[np.int64]
+        free_dofs: NDArray[np.int64],
+        use_cg: bool = False
 ) -> NDArray[np.float64]:
     """
-    Solve the modified full linear system with a direct solver.
+    Solve reduced system K[free,free] * u[free] = f[free].
     """
-    stiffness_modified = _modify_system_for_bcs(
-        stiffness_matrix, fixed_dof_indices
-    )
-    return spsolve(stiffness_modified, force_vector, use_umfpack=True)
+    # Extract reduced system using fast sparse slicing (CSR for rows, then CSC for cols)
+    K_ff = stiffness_matrix.tocsr()[free_dofs, :][:, free_dofs]
+    f_f = force_vector[free_dofs]
 
+    if use_cg:
+        u_f, exit_code = cg(K_ff, f_f)
+        if exit_code != 0:
+            raise RuntimeError(f"CG solver did not converge (exit code: {exit_code}).")
+    else:
+        u_f = spsolve(K_ff.tocsc(), f_f)
 
-def _solve_using_cg(
-        stiffness_matrix: SparseMatrix,
-        force_vector: NDArray[np.float64],
-        fixed_dof_indices: NDArray[np.int64]
-) -> NDArray[np.float64]:
-    """
-    Solve the modified full linear system with Conjugate Gradient.
-    Raises RuntimeError if CG does not converge.
-    """
-    stiffness_modified = _modify_system_for_bcs(
-        stiffness_matrix, fixed_dof_indices
-    )
-    solution_vector, exit_code = cg(stiffness_modified, force_vector)
-    if exit_code != 0:
-        raise RuntimeError(f"Conjugate Gradient solver did not converge (exit code: {exit_code}).")
-    return solution_vector
+    # Scatter back to full vector
+    u = np.zeros(stiffness_matrix.shape[0], dtype=np.float64)
+    u[free_dofs] = u_f
+    return u
 
 
 def solve_displacements(
         stiffness_matrix: SparseMatrix,
         force_vector: NDArray[np.float64],
-        fixed_dof_indices: NDArray[np.int64],
+        free_dofs: NDArray[np.int64],
         method: SolverMethod
 ) -> NDArray[np.float64]:
     """
-    Solve Ku = f with Dirichlet BCs on `fixed_dof_indices`.
-    Returns the full displacement vector (zeros enforced on fixed DOFs).
+    Solve Ku = f with Dirichlet BCs.
+    Expects precomputed free_dofs from compute_free_dofs().
+    Returns the full displacement vector (zeros at fixed DOFs).
     """
-
     match method:
         case SolverMethod.DIRECT:
-            return _solve_direct(stiffness_matrix, force_vector, fixed_dof_indices)
+            return _solve_reduced_system(stiffness_matrix, force_vector, free_dofs, use_cg=False)
         case SolverMethod.ITERATIVE:
-            return _solve_using_cg(stiffness_matrix, force_vector, fixed_dof_indices)
+            return _solve_reduced_system(stiffness_matrix, force_vector, free_dofs, use_cg=True)
         case _:
             raise ValueError(f"Unknown solver method: {method}")
 
