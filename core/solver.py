@@ -5,8 +5,6 @@ from numpy.typing import NDArray
 from scipy.sparse import csr_matrix as SparseMatrix
 from scipy.sparse.linalg import spsolve, cg
 
-from core.utils import time_benchmark
-
 
 class SolverMethod(Enum):
     DIRECT = auto()
@@ -48,7 +46,6 @@ def _solve_reduced_system(
     return u
 
 
-@time_benchmark
 def solve_displacements(
         stiffness_matrix: SparseMatrix,
         force_vector: NDArray[np.float64],
