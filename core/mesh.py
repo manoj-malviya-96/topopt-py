@@ -1,9 +1,8 @@
-from dataclasses import dataclass
-from typing import Literal
-
 import matplotlib.pyplot as plt
 import numpy as np
+from dataclasses import dataclass
 from numpy.typing import NDArray
+from typing import Literal
 
 
 @dataclass
@@ -118,3 +117,45 @@ def plot_density(density: NDArray[np.float64], nelx: int, nely: int,
         plt.show()
     else:
         plt.close()
+
+
+def create_optimization_gif(
+        density_history: list[NDArray[np.float64]],
+        nelx: int,
+        nely: int,
+        output_path: str,
+        frame_duration_ms: int = 100,
+        loop_count: int = 0,
+) -> None:
+    from PIL import Image
+    import io
+
+    frames: list[Image.Image] = []
+    figure_width = max(6.0, nelx / 10)
+    figure_height = max(4.0, nely / 10)
+
+    for iteration_index, density in enumerate(density_history):
+        density_2d = density.reshape((nelx, nely)).T
+
+        fig, ax = plt.subplots(figsize=(figure_width, figure_height))
+        ax.imshow(1 - density_2d, cmap='gray', origin='lower', vmin=0, vmax=1)
+        ax.set_title(f"Iteration {iteration_index + 1}")
+        ax.axis('equal')
+        ax.axis('off')
+        fig.tight_layout()
+
+        buffer = io.BytesIO()
+        fig.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
+        buffer.seek(0)
+        frames.append(Image.open(buffer).copy())
+        buffer.close()
+        plt.close(fig)
+
+    if frames:
+        frames[0].save(
+            output_path,
+            save_all=True,
+            append_images=frames[1:],
+            duration=frame_duration_ms,
+            loop=loop_count,
+        )

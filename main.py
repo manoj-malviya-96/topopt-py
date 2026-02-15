@@ -4,7 +4,7 @@ import argparse
 import logging
 import sys
 
-from core.mesh import plot_density
+from core.mesh import plot_density, create_optimization_gif
 from core.optimize import TopOptConfig, run_optimization
 from core.solver import SolverMethod
 
@@ -26,9 +26,9 @@ def parse_args() -> argparse.Namespace:
         description='Topology Optimization using SIMP method',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument('--nelx', type=int, default=100,
+    parser.add_argument('--nelx', type=int, default=200,
                         help='Number of elements in x direction')
-    parser.add_argument('--nely', type=int, default=50,
+    parser.add_argument('--nely', type=int, default=100,
                         help='Number of elements in y direction')
     parser.add_argument('--problem', type=str, default='mbb',
                         choices=['mbb', 'cantilever'],
@@ -50,6 +50,8 @@ def parse_args() -> argparse.Namespace:
                         help='Disable density filtering')
     parser.add_argument('--save', type=str, default=None,
                         help='Save final result to file (e.g., result.png)')
+    parser.add_argument('--gif', type=str, default=None,
+                        help='Save optimization animation as GIF (e.g., results/optimization.gif)')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Enable verbose output')
     parser.add_argument('--profile', action='store_true', help='Enable profiling')
@@ -86,8 +88,18 @@ def main() -> int:
             stats.sort_stats('cumulative')
             stats.print_stats(30)
             return 0
-        result = run_optimization(config)
-        plot_density(result, args.nelx, args.nely, show=True, save_path=args.save)
+
+        should_collect_history = args.gif is not None
+        optimization_result = run_optimization(config, collect_history=should_collect_history)
+
+        if should_collect_history:
+            final_density, density_history = optimization_result
+            create_optimization_gif(density_history, args.nelx, args.nely, args.gif)
+            logger.info(f"GIF saved to: {args.gif}")
+        else:
+            final_density = optimization_result
+
+        plot_density(final_density, args.nelx, args.nely, show=True, save_path=args.save)
         if args.save:
             logger.info(f"Result saved to: {args.save}")
         return 0

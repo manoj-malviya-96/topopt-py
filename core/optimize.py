@@ -1,10 +1,9 @@
 import logging
-from dataclasses import dataclass
-from typing import Literal
-
 import numpy as np
+from dataclasses import dataclass
 from numpy.typing import NDArray
 from tqdm import tqdm
+from typing import Literal
 
 from core.filters import create_filter_kernel, apply_density_filter
 from core.mesh import RectangularMesh, setup_problem
@@ -32,7 +31,8 @@ class TopOptConfig:
     use_filter: bool = True
 
 
-def run_optimization(config: TopOptConfig) -> np.ndarray:
+def run_optimization(config: TopOptConfig, collect_history: bool = False) -> np.ndarray | tuple[
+    np.ndarray, list[np.ndarray]]:
     """Run topology optimization and return final density field."""
     logger.info(f"Setting up {config.problem_type.upper()}: {config.nelx}x{config.nely}")
 
@@ -40,10 +40,15 @@ def run_optimization(config: TopOptConfig) -> np.ndarray:
     logger.info(f"Mesh: {mesh.n_elem} elements, {mesh.n_node} nodes, {mesh.n_dof} DOFs")
 
     logger.info("Starting optimization...")
-    density_final, compliance = optimize_compliance(mesh, fixed_dofs, force, config, show_progress=True)
+    density_final, compliance, density_history = optimize_compliance(
+        mesh, fixed_dofs, force, config, show_progress=True, collect_history=collect_history
+    )
 
     logger.info(f"Final compliance: {compliance:.4f}")
     logger.info(f"Final volume fraction: {density_final.mean():.4f}")
+
+    if collect_history:
+        return density_final, density_history
     return density_final
 
 
@@ -84,7 +89,8 @@ def _oc_update(density: NDArray[np.float64], dc: NDArray[np.float64],
 
 def optimize_compliance(mesh: RectangularMesh, fixed_dofs: NDArray[np.int64],
                         force: NDArray[np.float64], config: TopOptConfig,
-                        show_progress: bool = True) -> tuple[NDArray[np.float64], float]:
+                        show_progress: bool = True, collect_history: bool = False) -> tuple[
+    NDArray[np.float64], float, list[NDArray[np.float64]]]:
     """Run SIMP topology optimization for compliance minimization."""
     ke = build_element_stiffness(nu=0.3)
     kernel = create_filter_kernel(config.r_min) if config.use_filter else None
@@ -100,6 +106,7 @@ def optimize_compliance(mesh: RectangularMesh, fixed_dofs: NDArray[np.int64],
 
     density = np.full(mesh.n_elem, config.target_vol_frac, dtype=np.float64)
     density_prev = np.empty_like(density)
+    density_history: list[NDArray[np.float64]] = []
 
     pbar = tqdm(range(1, config.max_iter + 1), desc="Optimizing",
                 disable=not show_progress, ncols=80)
@@ -107,6 +114,9 @@ def optimize_compliance(mesh: RectangularMesh, fixed_dofs: NDArray[np.int64],
     compliance = 0.0
     for _ in pbar:
         density_phys = filter_density(density)
+
+        if collect_history:
+            density_history.append(density_phys.copy())
 
         K = assembler.assemble(density_phys, config.penalization,
                                config.young_modulus, config.young_modulus_min)
@@ -136,4 +146,7 @@ def optimize_compliance(mesh: RectangularMesh, fixed_dofs: NDArray[np.int64],
         pbar.set_description("Max iter")
 
     pbar.close()
-    return filter_density(density), compliance
+    final_density = filter_density(density)
+    if collect_history:
+        density_history.append(final_density.copy())
+    return final_density, compliance, density_history
