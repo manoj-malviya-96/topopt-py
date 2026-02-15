@@ -1,40 +1,34 @@
-import time
-import tracemalloc
 import functools
 import logging
+import time
+import tracemalloc
 
 
 def time_benchmark(func):
-    """
-    A decorator that prints the time a function takes to execute.
-    """
+    """Decorator that logs function execution time."""
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        start_time = time.perf_counter()
+        start = time.perf_counter()
         result = func(*args, **kwargs)
-        end_time = time.perf_counter()
-        duration = end_time - start_time
-        logging.info(f"[Time Benchmark] Function '{func.__name__}' took: {duration:.6f} seconds.")
+        duration = time.perf_counter() - start
+        logging.info(f"[Time] {func.__name__}: {duration:.6f}s")
         return result
 
     return wrapper
 
 
 def memory_benchmark(func):
-    """
-    A decorator that prints the peak memory usage of a function.
-    """
+    """Decorator that logs peak memory usage."""
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         tracemalloc.start()
         tracemalloc.clear_traces()
         result = func(*args, **kwargs)
-        current, peak = tracemalloc.get_traced_memory()
+        _, peak = tracemalloc.get_traced_memory()
         tracemalloc.stop()
-        peak_mb = peak / 1024 / 1024
-        logging.info(f"[Memory Benchmark] Function '{func.__name__}' peaked at: {peak_mb:.6f} MB")
+        logging.info(f"[Memory] {func.__name__}: {peak / 1024 / 1024:.6f} MB")
         return result
 
     return wrapper
