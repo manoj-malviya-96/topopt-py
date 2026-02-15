@@ -8,8 +8,8 @@ from tqdm import tqdm
 
 from core.filters import create_filter_kernel, apply_density_filter
 from core.mesh import RectangularMesh, setup_problem
-from core.solver import solve_displacements, SolverMethod, compute_free_dofs
-from core.stiffness import build_element_stiffness, assemble_stiffness_matrix
+from core.solver import SolverMethod, compute_free_dofs, create_solver
+from core.stiffness import build_element_stiffness, StiffnessAssembler
 
 logger = logging.getLogger(__name__)
 
@@ -66,28 +66,44 @@ def _oc_update(
     """
     Optimality Criteria update. Modifies x in-place.
     """
+    n = x.size
+    target_sum = volfrac * n
+
     lower_bound = np.maximum(x - move, 1e-3)
     upper_bound = np.minimum(x + move, 1.0)
+
+    # Precompute ratio base (avoid division in loop)
+    neg_dc_over_dv = -dc / dv
+
     lambda_min, lambda_max = 0.0, 1e9
+    x_new = np.empty_like(x)
 
-    # Run binary search
-    for i in range(100):
+    # Run binary search with fewer iterations (50 is sufficient for 1e-4 precision)
+    for _ in range(50):
         lambda_mid = 0.5 * (lambda_min + lambda_max)
-        ratio = -dc / (dv * lambda_mid)
-        be = np.where(ratio > 0, np.sqrt(ratio), 1.0)
+        ratio = neg_dc_over_dv / lambda_mid
 
-        # Update and clip
-        np.multiply(x, be, out=x)
-        np.clip(x, lower_bound, upper_bound, out=x)
+        # Compute be = sqrt(ratio) where ratio > 0, else 1.0
+        np.maximum(ratio, 0, out=x_new)
+        np.sqrt(x_new, out=x_new)
+        x_new[ratio <= 0] = 1.0
 
-        # Bisection
-        if x.mean() > volfrac:
+        # Update: x_new = clip(x * be, lower, upper)
+        np.multiply(x, x_new, out=x_new)
+        np.clip(x_new, lower_bound, upper_bound, out=x_new)
+
+        # Bisection using sum instead of mean (faster)
+        current_sum = x_new.sum()
+        if current_sum > target_sum:
             lambda_min = lambda_mid
         else:
             lambda_max = lambda_mid
 
-        if abs(x.mean() - volfrac) < 1e-4:
+        if abs(current_sum - target_sum) < 1e-4 * n:
             break
+
+    # Copy result back to x
+    np.copyto(x, x_new)
 
 
 def optimize_compliance(
@@ -105,6 +121,12 @@ def optimize_compliance(
 
     # Cache free DOFs once (fixed DOFs don't change during optimization)
     free_dofs = compute_free_dofs(mesh.n_dof, fixed_dofs)
+
+    # Create solver instance (reused across iterations)
+    solver = create_solver(config.solver_method, mesh.n_dof, free_dofs)
+
+    # Create stiffness assembler (caches sparsity pattern)
+    assembler = StiffnessAssembler(mesh.elem_conn, stiffness_mat)
 
     def apply_filter(input_array: NDArray[np.float64]) -> NDArray[np.float64]:
         if filter_kernel is None:
@@ -128,17 +150,16 @@ def optimize_compliance(
         x_phys = apply_filter(x)
 
         # Assemble stiffness and solve
-        global_stiffness_matrix = assemble_stiffness_matrix(
-            mesh.elem_conn, stiffness_mat, x_phys,
-            config.penalization, config.young_modulus, config.young_modulus_min
+        global_stiffness_matrix = assembler.assemble(
+            x_phys, config.penalization, config.young_modulus, config.young_modulus_min
         )
-        u = solve_displacements(global_stiffness_matrix, force_vector, free_dofs, config.solver_method)
+        u = solver.solve(global_stiffness_matrix, force_vector)
         compliance = float(force_vector @ u)
 
         elem_u = u[mesh.elem_conn]
         strain_energy = np.einsum('ij,jk,ik->i', elem_u, stiffness_mat, elem_u)
         dc = -config.penalization * (config.young_modulus - config.young_modulus_min) * \
-             (x_phys ** (config.penalization - 1)) * strain_energy
+             np.power(x_phys, config.penalization - 1) * strain_energy
 
         # Filter sensitivities
         if filter_kernel is not None:
