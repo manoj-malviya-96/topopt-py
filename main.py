@@ -5,9 +5,8 @@ import logging
 import sys
 
 from core.mesh import plot_density
-from core.optimize import run_optimization, TopOptConfig
+from core.optimize import TopOptConfig, run_optimization
 from core.solver import SolverMethod
-from core.utils import memory_benchmark, time_benchmark
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -53,14 +52,9 @@ def parse_args() -> argparse.Namespace:
                         help='Save final result to file (e.g., result.png)')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Enable verbose output')
+    parser.add_argument('--profile', action='store_true', help='Enable profiling')
 
     return parser.parse_args()
-
-
-@time_benchmark
-@memory_benchmark
-def _run_optimization(*args):
-    return run_optimization(*args)
 
 
 def main() -> int:
@@ -81,7 +75,18 @@ def main() -> int:
             solver_method=solver_method,
             use_filter=not args.no_filter,
         )
-        result = _run_optimization(config)
+        if args.profile:
+            import cProfile
+            import pstats
+            profiler = cProfile.Profile()
+            profiler.enable()
+            run_optimization(config)
+            profiler.disable()
+            stats = pstats.Stats(profiler)
+            stats.sort_stats('cumulative')
+            stats.print_stats(30)
+            return 0
+        result = run_optimization(config)
         plot_density(result, args.nelx, args.nely, show=True, save_path=args.save)
         if args.save:
             logger.info(f"Result saved to: {args.save}")
