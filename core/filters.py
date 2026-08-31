@@ -28,21 +28,3 @@ def apply_density_filter(density: NDArray[np.float64], kernel: NDArray[np.float6
                          mode: FilterMode, normalization: NDArray[np.float64]) -> NDArray[np.float64]:
     """Apply density filter using precomputed boundary normalization."""
     return ndimage_convolve(density, kernel, mode=mode) / normalization
-
-
-def heaviside_projection(x: NDArray[np.float64], eta: float, beta: float) -> NDArray[np.float64]:
-    """Smooth Heaviside projection for sharp boundaries."""
-    numer = np.tanh(beta * eta) + np.tanh(beta * (x - eta))
-    denom = np.tanh(beta * eta) + np.tanh(beta * (1 - eta))
-    if np.isclose(denom, 0):
-        raise ValueError("Heaviside denominator is zero")
-    return numer / denom
-
-
-def d_heaviside_dx(x: NDArray[np.float64], eta: float, beta: float) -> NDArray[np.float64]:
-    """Derivative of Heaviside projection w.r.t. x."""
-    t = np.tanh(beta * (x - eta))
-    denom = np.tanh(beta * eta) + np.tanh(beta * (1 - eta))
-    if np.isclose(denom, 0):
-        raise ValueError("Heaviside derivative denominator is zero")
-    return beta * (1 - t ** 2) / denom

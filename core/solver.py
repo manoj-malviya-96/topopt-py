@@ -99,24 +99,6 @@ def create_solver(method: SolverMethod, n_dof: int, free_dofs: NDArray[np.int64]
     raise ValueError(f"Unknown solver: {method}")
 
 
-def solve_displacements(K: SparseMatrix, f: NDArray[np.float64],
-                        free_dofs: NDArray[np.int64], method: SolverMethod) -> NDArray[np.float64]:
-    """One-shot solve. Prefer create_solver() for repeated solves."""
-    K_free = K.tocsc()[free_dofs, :][:, free_dofs]
-    f_free = f[free_dofs]
-
-    if method == SolverMethod.DIRECT:
-        u_free = splu(K_free).solve(f_free)
-    else:
-        u_free, info = cg(K_free, f_free, rtol=1e-8)
-        if info != 0:
-            raise RuntimeError(f"CG did not converge (info={info})")
-
-    u = np.zeros(K.shape[0], dtype=np.float64)
-    u[free_dofs] = u_free
-    return u
-
-
 def compute_sensitivity(elem_dof_indices: NDArray[np.int64], ke: NDArray[np.float64],
                         displacement: NDArray[np.float64], density: NDArray[np.float64],
                         penal: float, E: float, E_min: float) -> NDArray[np.float64]:

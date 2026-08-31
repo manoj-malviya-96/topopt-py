@@ -40,7 +40,7 @@ def build_rectangular_mesh(nelx: int, nely: int) -> RectangularMesh:
 
 
 def get_mbb_boundary_conditions(mesh: RectangularMesh) -> tuple[
-    NDArray[np.int64], NDArray[np.int64], NDArray[np.float64]]:
+    NDArray[np.int64], NDArray[np.float64]]:
     """MBB beam: left edge symmetric (ux=0), bottom-right pinned (uy=0), load at top-left."""
     left_nodes = np.arange(mesh.nely + 1)
     fixed_ux = 2 * left_nodes
@@ -56,11 +56,11 @@ def get_mbb_boundary_conditions(mesh: RectangularMesh) -> tuple[
     force = np.zeros(mesh.n_dof, dtype=np.float64)
     force[load_dof] = -1.0
 
-    return fixed_dofs, np.array([load_dof], dtype=np.int64), force
+    return fixed_dofs, force
 
 
 def get_cantilever_boundary_conditions(mesh: RectangularMesh) -> tuple[
-    NDArray[np.int64], NDArray[np.int64], NDArray[np.float64]]:
+    NDArray[np.int64], NDArray[np.float64]]:
     """Cantilever: left edge fully fixed, load at mid-right."""
     left_nodes = np.arange(mesh.nely + 1)
     fixed_dofs = np.concatenate([2 * left_nodes, 2 * left_nodes + 1])
@@ -71,7 +71,7 @@ def get_cantilever_boundary_conditions(mesh: RectangularMesh) -> tuple[
     force = np.zeros(mesh.n_dof, dtype=np.float64)
     force[load_dof] = -1.0
 
-    return fixed_dofs, np.array([load_dof], dtype=np.int64), force
+    return fixed_dofs, force
 
 
 ProblemType = Literal["mbb", "cantilever"]
@@ -83,9 +83,9 @@ def setup_problem(nelx: int, nely: int, problem_type: ProblemType = "mbb") -> tu
     mesh = build_rectangular_mesh(nelx, nely)
 
     if problem_type == "mbb":
-        fixed_dofs, _, force = get_mbb_boundary_conditions(mesh)
+        fixed_dofs, force = get_mbb_boundary_conditions(mesh)
     elif problem_type == "cantilever":
-        fixed_dofs, _, force = get_cantilever_boundary_conditions(mesh)
+        fixed_dofs, force = get_cantilever_boundary_conditions(mesh)
     else:
         raise ValueError(f"Unknown problem type: {problem_type}")
 
@@ -93,8 +93,7 @@ def setup_problem(nelx: int, nely: int, problem_type: ProblemType = "mbb") -> tu
 
 
 def plot_density(density: NDArray[np.float64], nelx: int, nely: int,
-                 iteration: int | None = None, show: bool = True,
-                 save_path: str | None = None) -> None:
+                 show: bool = True, save_path: str | None = None) -> None:
     """Plot density field as grayscale image."""
     density_2d = density.reshape((nelx, nely)).T
 
@@ -103,11 +102,7 @@ def plot_density(density: NDArray[np.float64], nelx: int, nely: int,
     plt.colorbar(label='Void (white) / Solid (black)')
     plt.axis('equal')
     plt.axis('off')
-
-    title = "Topology Optimization Result"
-    if iteration is not None:
-        title += f" (Iteration {iteration})"
-    plt.title(title)
+    plt.title("Topology Optimization Result")
     plt.tight_layout()
 
     if save_path:

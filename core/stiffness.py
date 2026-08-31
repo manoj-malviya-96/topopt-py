@@ -76,28 +76,3 @@ class StiffnessAssembler:
         return sp.csc_matrix((data, self._csc_indices, self._csc_indptr),
                              shape=(self._n_dof, self._n_dof))
 
-
-@lru_cache(maxsize=None)
-def _get_local_indices(dofs_per_elem: int) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
-    """Cached local DOF index patterns."""
-    i_local = np.repeat(np.arange(dofs_per_elem, dtype=np.int64), dofs_per_elem)
-    j_local = np.tile(np.arange(dofs_per_elem, dtype=np.int64), dofs_per_elem)
-    return i_local, j_local
-
-
-def assemble_stiffness_matrix(elem_dof_indices: NDArray[np.int64], ke: NDArray[np.float64],
-                              density: NDArray[np.float64], penal: float,
-                              E: float, E_min: float) -> sp.csr_matrix:
-    """Vectorized global stiffness assembly. Prefer StiffnessAssembler for loops."""
-    n_dof = int(elem_dof_indices.max()) + 1
-    dofs_per_elem = ke.shape[0]
-
-    material_factor = E_min + np.power(density, penal) * (E - E_min)
-    i_local, j_local = _get_local_indices(dofs_per_elem)
-
-    rows = elem_dof_indices[:, i_local].ravel()
-    cols = elem_dof_indices[:, j_local].ravel()
-    values = (material_factor[:, np.newaxis] * ke.ravel()).ravel()
-
-    coo = sp.coo_matrix((values, (rows, cols)), shape=(n_dof, n_dof))
-    return coo.tocsr()
