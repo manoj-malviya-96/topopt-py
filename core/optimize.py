@@ -5,9 +5,9 @@ from numpy.typing import NDArray
 from tqdm import tqdm
 from typing import Literal
 
-from core.filters import create_filter_kernel, apply_density_filter
+from core.filters import create_filter_kernel, apply_density_filter, compute_filter_normalization
 from core.mesh import RectangularMesh, setup_problem
-from core.solver import SolverMethod, compute_free_dofs, create_solver
+from core.solver import SolverMethod, compute_free_dofs, compute_sensitivity, create_solver
 from core.stiffness import build_element_stiffness, StiffnessAssembler
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,10 @@ def optimize_compliance(mesh: RectangularMesh, fixed_dofs: NDArray[np.int64],
     """Run SIMP topology optimization for compliance minimization."""
     ke = build_element_stiffness(nu=0.3)
     kernel = create_filter_kernel(config.r_min) if config.use_filter else None
+    filter_normalization = (
+        compute_filter_normalization((mesh.nelx, mesh.nely), kernel, 'constant')
+        if kernel is not None else None
+    )
 
     free_dofs = compute_free_dofs(mesh.n_dof, fixed_dofs)
     solver = create_solver(config.solver_method, mesh.n_dof, free_dofs)
@@ -102,11 +106,13 @@ def optimize_compliance(mesh: RectangularMesh, fixed_dofs: NDArray[np.int64],
     def filter_density(x: NDArray[np.float64]) -> NDArray[np.float64]:
         if kernel is None:
             return x
-        return apply_density_filter(x.reshape(mesh.nelx, mesh.nely), kernel, 'constant').flatten()
+        return apply_density_filter(x.reshape(mesh.nelx, mesh.nely), kernel,
+                                    'constant', filter_normalization).flatten()
 
     density = np.full(mesh.n_elem, config.target_vol_frac, dtype=np.float64)
     density_prev = np.empty_like(density)
     density_history: list[NDArray[np.float64]] = []
+    dv = np.ones(mesh.n_elem) / mesh.n_elem
 
     pbar = tqdm(range(1, config.max_iter + 1), desc="Optimizing",
                 disable=not show_progress, ncols=80)
@@ -123,15 +129,12 @@ def optimize_compliance(mesh: RectangularMesh, fixed_dofs: NDArray[np.int64],
         u = solver.solve(K, force)
         compliance = float(force @ u)
 
-        elem_u = u[mesh.elem_conn]
-        strain_energy = np.einsum('ij,jk,ik->i', elem_u, ke, elem_u)
-        dc = -config.penalization * (config.young_modulus - config.young_modulus_min) * \
-             np.power(density_phys, config.penalization - 1) * strain_energy
+        dc = compute_sensitivity(mesh.elem_conn, ke, u, density_phys,
+                                 config.penalization, config.young_modulus,
+                                 config.young_modulus_min)
 
         if kernel is not None:
-            dc = apply_density_filter(dc.reshape(mesh.nelx, mesh.nely), kernel, 'constant').flatten()
-
-        dv = np.ones(mesh.n_elem) / mesh.n_elem
+            dc = filter_density(dc)
 
         np.copyto(density_prev, density)
         _oc_update(density, dc, dv, config.target_vol_frac, config.move)
