@@ -11,3 +11,9 @@ dependencies = [
     "scipy-stubs==1.17.0.2",
     "tqdm>=4.67.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.411",
+    "ruff>=0.16.6",
+]
