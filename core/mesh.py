@@ -154,3 +154,42 @@ def create_optimization_gif(
             duration=frame_duration_ms,
             loop=loop_count,
         )
+
+
+def create_optimization_webm(
+        density_history: list[NDArray[np.float64]],
+        nelx: int,
+        nely: int,
+        output_path: str,
+        fps: int = 10,
+        dpi: int = 150,
+        transparent: bool = False,
+) -> None:
+    from matplotlib.animation import FFMpegWriter
+
+    figure_width = max(6.0, nelx / 10)
+    figure_height = max(4.0, nely / 10)
+
+    fig, ax = plt.subplots(figsize=(figure_width, figure_height))
+    if transparent:
+        fig.patch.set_alpha(0.0)
+        ax.patch.set_alpha(0.0)
+    ax.axis('equal')
+    ax.axis('off')
+    fig.tight_layout()
+
+    first_density = 1 - density_history[0].reshape((nelx, nely)).T
+    image = ax.imshow(first_density, cmap='gray', origin='lower', vmin=0, vmax=1)
+    title = ax.set_title("Iteration 1")
+
+    extra_args = ['-pix_fmt', 'yuva420p'] if transparent else None
+    writer = FFMpegWriter(fps=fps, extra_args=extra_args)
+
+    with writer.saving(fig, output_path, dpi=dpi):
+        for iteration_index, density in enumerate(density_history):
+            density_2d = density.reshape((nelx, nely)).T
+            image.set_data(1 - density_2d)
+            title.set_text(f"Iteration {iteration_index + 1}")
+            writer.grab_frame(transparent=transparent)
+
+    plt.close(fig)
