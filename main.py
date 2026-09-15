@@ -3,7 +3,7 @@ import argparse
 import logging
 import sys
 
-from core.mesh import plot_density, create_optimization_gif
+from core.mesh import plot_density, create_optimization_gif, create_optimization_webm
 from core.optimize import TopOptConfig, run_optimization
 from core.solver import SolverMethod
 
@@ -51,6 +51,14 @@ def parse_args() -> argparse.Namespace:
                         help='Save final result to file (e.g., result.png)')
     parser.add_argument('--gif', type=str, default=None,
                         help='Save optimization animation as GIF (e.g., results/optimization.gif)')
+    parser.add_argument('--webm', type=str, default=None,
+                        help='Save optimization animation as WebM video (e.g., results/optimization.webm)')
+    parser.add_argument('--video-dpi', type=int, default=150,
+                        help='Resolution (dpi) for the WebM export')
+    parser.add_argument('--video-fps', type=int, default=10,
+                        help='Frame rate for the WebM export')
+    parser.add_argument('--transparent', action='store_true',
+                        help='Render the WebM export with a transparent background')
     parser.add_argument('--verbose', '-v', action='store_true',
                         help='Enable verbose output')
     parser.add_argument('--profile', action='store_true', help='Enable profiling')
@@ -88,13 +96,20 @@ def main() -> int:
             stats.print_stats(30)
             return 0
 
-        should_collect_history = args.gif is not None
+        should_collect_history = args.gif is not None or args.webm is not None
         optimization_result = run_optimization(config, collect_history=should_collect_history)
 
         if should_collect_history:
             final_density, density_history = optimization_result
-            create_optimization_gif(density_history, args.nelx, args.nely, args.gif)
-            logger.info(f"GIF saved to: {args.gif}")
+            if args.gif:
+                create_optimization_gif(density_history, args.nelx, args.nely, args.gif)
+                logger.info(f"GIF saved to: {args.gif}")
+            if args.webm:
+                create_optimization_webm(
+                    density_history, args.nelx, args.nely, args.webm,
+                    fps=args.video_fps, dpi=args.video_dpi, transparent=args.transparent,
+                )
+                logger.info(f"WebM saved to: {args.webm}")
         else:
             final_density = optimization_result
 
